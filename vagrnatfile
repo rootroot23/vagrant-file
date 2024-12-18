@@ -1,0 +1,49 @@
+Vagrant.configure("2") do |config|
+
+  # Configuration commune à toutes les VMs
+  config.vm.box = "hashicorp/bionic64" # Remplacez par une box compatible VMware
+
+  # Configuration de la box spécifique pour VMware
+  config.vm.provider "vmware_desktop" do |v|
+    v.vmx["memsize"] = "512"
+  end
+
+  # VM pour le nœud de contrôle Ansible
+  config.vm.define "ansible-control" do |control|
+    control.vm.hostname = "ansible-control"
+    control.vm.network "private_network", ip: "192.168.56.10"
+    control.vm.provider "vmware_desktop" do |vmware|
+      vmware.vmx["memsize"] = "512"
+    end
+    control.vm.provision "shell", inline: <<-SHELL
+      apt-get update
+      apt-get install -y python3-pip
+      pip3 install ansible
+      if [ ! -f /home/vagrant/.ssh/id_ed25519 ]; then
+        ssh-keygen -t ed25519 -f /home/vagrant/.ssh/id_ed25519 -q -N ""
+        chown -R vagrant:vagrant /home/vagrant/.ssh
+        cat /home/vagrant/.ssh/id_ed25519.pub > /vagrant/ansible-control.pub
+      fi
+    SHELL
+  end
+
+  # VMs pour les nœuds gérés
+  {
+    "managed-node1" => "192.168.56.11",
+    "managed-node2" => "192.168.56.12"
+  }.each do |hostname, ip|
+    config.vm.define hostname do |node|
+      node.vm.hostname = hostname
+      node.vm.network "private_network", ip: ip
+      node.vm.provider "vmware_desktop" do |vmware|
+        vmware.vmx["memsize"] = "512"
+      end
+      node.vm.provision "shell", inline: <<-SHELL
+      if ! grep -q "$(cat /vagrant/ansible-control.pub)" /home/vagrant/.ssh/authorized_keys; then
+        cat /vagrant/ansible-control.pub >> /home/vagrant/.ssh/authorized_keys
+      fi
+      SHELL
+    end
+  end
+
+end
